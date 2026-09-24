@@ -103,7 +103,7 @@ async def _pending_approval(
         select(ActionApproval).where(
             ActionApproval.id == approval_id,
             ActionApproval.user_id == user_id,
-        )
+        ).with_for_update()
     )
     if approval is None:
         raise HTTPException(status_code=404, detail="Approval not found")

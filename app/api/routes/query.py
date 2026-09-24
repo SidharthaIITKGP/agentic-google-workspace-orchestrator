@@ -14,7 +14,7 @@ from app.orchestration.planner import QueryPlanner
 from app.orchestration.runtime import build_agent_registry
 from app.orchestration.synthesis import ResponseSynthesizer
 from app.schemas.api import QueryRequest, QueryResponse
-from app.schemas.contracts import ExecutionStatus, StepResult
+from app.schemas.contracts import ExecutionStatus, StepResult, StructuredData
 
 router = APIRouter(prefix="/api/v1", tags=["queries"])
 
@@ -40,7 +40,7 @@ async def submit_query(
             query=request.query,
             context=context,
             reference_time=datetime.now(timezone.utc),
-            timezone_name="UTC",
+            timezone_name=settings.default_user_timezone,
         )
         if intent.requires_clarification:
             clarification = intent.clarification_question or "Could you clarify your request?"
@@ -59,7 +59,12 @@ async def submit_query(
             )
 
         registry = build_agent_registry(session, user_id, settings)
-        plan = await QueryPlanner(provider, registry).create_plan(request.query, intent)
+        plan = await QueryPlanner(provider, registry).create_plan(
+            request.query,
+            intent,
+            timezone_name=settings.default_user_timezone,
+            default_meeting_duration_minutes=settings.default_meeting_duration_minutes,
+        )
         outcome = await DAGExecutor(session, registry).execute(
             user_id=user_id,
             conversation_id=conversation.id,
@@ -68,7 +73,7 @@ async def submit_query(
         )
         try:
             response_text = await ResponseSynthesizer(provider).synthesize(
-                request.query, outcome.results
+                request.query, _compact_results_for_synthesis(outcome.results)
             )
         except LLMProviderError:
             response_text = _grounded_fallback(outcome.results)
@@ -170,3 +175,34 @@ def _grounded_fallback(results: list[StepResult]) -> str:
     if failed:
         parts.append(f"{failed} step(s) could not be completed.")
     return " ".join(parts)
+
+
+def _compact_results_for_synthesis(results: list[StepResult]) -> list[StepResult]:
+    return [
+        result.model_copy(update={"data": _compact_result_data(result.data)})
+        for result in results
+    ]
+
+
+def _compact_result_data(data: StructuredData) -> StructuredData:
+    events = data.get("events")
+    if not isinstance(events, list):
+        return data
+
+    compact_events = []
+    for event in events[:20]:
+        if not isinstance(event, dict):
+            continue
+        compact = {
+            key: event[key]
+            for key in ("title", "start", "end", "attendees", "status")
+            if key in event
+        }
+        description = event.get("description")
+        if isinstance(description, str) and description:
+            compact["description"] = description[:500]
+        compact_events.append(compact)
+    return {
+        "events": compact_events,
+        "next_page_token": data.get("next_page_token"),
+    }

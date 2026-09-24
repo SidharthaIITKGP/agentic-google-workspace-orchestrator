@@ -17,7 +17,15 @@ GOOGLE_REDIRECT_URI=http://localhost:8000/api/v1/auth/google/callback
 TOKEN_ENCRYPTION_KEY=...
 GROQ_API_KEY=...
 GROQ_MODEL=llama-3.3-70b-versatile
+DEFAULT_USER_TIMEZONE=Asia/Kolkata
+DEFAULT_MEETING_DURATION_MINUTES=30
 ```
+
+Natural-language dates and times are interpreted in `DEFAULT_USER_TIMEZONE`.
+Calendar creation uses `DEFAULT_MEETING_DURATION_MINUTES` only when the user
+provides a start time without an end time or duration. Google Meet conferencing
+is requested only when the query explicitly asks for it, and calendar writes
+remain approval-gated.
 
 Start authentication in a browser at `http://localhost:8000/api/v1/auth/google`. The callback stores only encrypted access and refresh tokens, then creates an HttpOnly application session cookie.
 

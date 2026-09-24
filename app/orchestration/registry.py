@@ -1,6 +1,10 @@
 from app.agents.calendar import CalendarAgent
 from app.agents.drive import DriveAgent
 from app.agents.gmail import GmailAgent
+from app.orchestration.operation_specs import (
+    planner_operation_catalog,
+    validate_operation_arguments,
+)
 from app.schemas.contracts import AgentResult, ExecutionPlan, Service, StructuredData
 
 APPROVAL_REQUIRED_OPERATIONS = {
@@ -44,6 +48,7 @@ class AgentRegistry:
     def validate_plan(self, plan: ExecutionPlan) -> None:
         for step in plan.steps:
             self.validate_operation(step.service, step.operation)
+            validate_operation_arguments(step.service, step.operation, step.arguments)
 
     def requires_approval(self, service: Service, operation: str) -> bool:
         self.validate_operation(service, operation)
@@ -56,10 +61,8 @@ class AgentRegistry:
         arguments: StructuredData,
     ) -> AgentResult:
         self.validate_operation(service, operation)
+        validate_operation_arguments(service, operation, arguments)
         return await self._agents[service].execute(operation, arguments)
 
-    def prompt_catalog(self) -> dict[str, list[str]]:
-        return {
-            service.value: sorted(operations)
-            for service, operations in self._operations.items()
-        }
+    def prompt_catalog(self) -> dict[str, dict[str, dict[str, object]]]:
+        return planner_operation_catalog()

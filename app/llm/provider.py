@@ -40,7 +40,10 @@ class GroqProvider:
                 temperature=0,
                 response_format={"type": "json_object"},
                 messages=[
-                    {"role": "system", "content": system_prompt},
+                    {
+                        "role": "system",
+                        "content": f"{system_prompt}\n\nReturn a valid JSON object.",
+                    },
                     {"role": "user", "content": json.dumps(payload, default=str)},
                 ],
             )

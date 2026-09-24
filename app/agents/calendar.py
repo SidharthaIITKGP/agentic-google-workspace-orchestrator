@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime
 from typing import Any
+from uuid import uuid4
 
 from app.agents.common import (
     bounded_int,
@@ -54,7 +55,7 @@ class CalendarAgent:
             q=optional_string(arguments, "keywords"),
             singleEvents=True,
             orderBy="startTime",
-            maxResults=bounded_int(arguments, "max_results", 50, 250),
+            maxResults=bounded_int(arguments, "max_results", 20, 250),
         )
         response = await asyncio.to_thread(request.execute)
         attendee = optional_string(arguments, "attendee")
@@ -87,14 +88,23 @@ class CalendarAgent:
     async def create_event(self, arguments: StructuredData) -> AgentResult:
         service = await self._clients.build("calendar", "v3")
         body = _event_body(arguments, require_times=True)
+        create_google_meet = arguments.get("create_google_meet") is True
+        if create_google_meet:
+            body["conferenceData"] = {
+                "createRequest": {
+                    "requestId": uuid4().hex,
+                    "conferenceSolutionKey": {"type": "hangoutsMeet"},
+                }
+            }
+        insert_arguments: dict[str, Any] = {
+            "calendarId": optional_string(arguments, "calendar_id") or "primary",
+            "body": body,
+            "sendUpdates": "all",
+        }
+        if create_google_meet:
+            insert_arguments["conferenceDataVersion"] = 1
         event = await asyncio.to_thread(
-            service.events()
-            .insert(
-                calendarId=optional_string(arguments, "calendar_id") or "primary",
-                body=body,
-                sendUpdates="all",
-            )
-            .execute
+            service.events().insert(**insert_arguments).execute
         )
         return completed({"event": _event_summary(event)}, [str(event["id"])])
 
@@ -171,6 +181,8 @@ def _event_summary(event: dict[str, Any]) -> dict[str, Any]:
         "attendees": [item.get("email") for item in event.get("attendees", []) if item.get("email")],
         "html_link": event.get("htmlLink"),
         "status": event.get("status"),
+        "meet_url": event.get("hangoutLink"),
+        "conference_data": event.get("conferenceData"),
     }
 
 

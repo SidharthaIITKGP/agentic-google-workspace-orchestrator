@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     token_encryption_key: str = ""
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
+    default_user_timezone: str = "Asia/Kolkata"
+    default_meeting_duration_minutes: int = Field(default=30, ge=1, le=1440)
     oauth_state_ttl_seconds: int = Field(default=600, ge=60)
     session_ttl_seconds: int = Field(default=604800, ge=300)
     llm_timeout_seconds: float = Field(default=30.0, gt=0)
