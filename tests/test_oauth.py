@@ -13,7 +13,7 @@ from app.db.models import GoogleCredential, User
 
 class FakeCache:
     def __init__(self) -> None:
-        self.values = {"oauth-state:state": {"valid": True}}
+        self.values = {"oauth-state:state": {"code_verifier": "verifier"}}
 
     async def get_json(self, key: str):
         return self.values.get(key)
@@ -78,8 +78,14 @@ def test_oauth_callback_encrypts_tokens_and_sets_session(monkeypatch) -> None:
             def get(self):
                 return UserInfoRequest()
 
+        restored_verifiers: list[str | None] = []
+
+        def create_flow(state: str, code_verifier: str | None = None):
+            restored_verifiers.append(code_verifier)
+            return Flow()
+
         monkeypatch.setattr(auth_routes, "get_settings", lambda: settings)
-        monkeypatch.setattr(auth_routes, "_create_flow", lambda state: Flow())
+        monkeypatch.setattr(auth_routes, "_create_flow", create_flow)
         monkeypatch.setattr(auth_routes, "build", lambda *args, **kwargs: OAuthService())
         session = FakeSession()
         cache = FakeCache()
@@ -97,6 +103,7 @@ def test_oauth_callback_encrypts_tokens_and_sets_session(monkeypatch) -> None:
         assert cipher.decrypt(stored.encrypted_refresh_token) == "refresh-token"
         assert stored.encrypted_access_token != "access-token"
         assert session.committed is True
+        assert restored_verifiers == ["verifier"]
         assert "workspace_session=" in response.headers["set-cookie"]
         assert json.loads(response.body)["status"] == "authenticated"
 

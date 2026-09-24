@@ -26,16 +26,18 @@ async def google_login(cache: RedisCacheDependency) -> RedirectResponse:
     settings = get_settings()
     _require_oauth_configuration()
     state = secrets.token_urlsafe(32)
-    await cache.set_json(
-        f"oauth-state:{state}",
-        {"valid": True},
-        ttl_seconds=settings.oauth_state_ttl_seconds,
-    )
     flow = _create_flow(state=state)
     authorization_url, _ = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
         prompt="consent",
+    )
+    if not flow.code_verifier:
+        raise HTTPException(status_code=500, detail="Google authentication could not be started")
+    await cache.set_json(
+        f"oauth-state:{state}",
+        {"code_verifier": flow.code_verifier},
+        ttl_seconds=settings.oauth_state_ttl_seconds,
     )
     return RedirectResponse(authorization_url)
 
@@ -51,10 +53,12 @@ async def google_callback(
     _require_oauth_configuration()
     stored_state = await cache.get_json(f"oauth-state:{state}")
     await cache.delete(f"oauth-state:{state}")
-    if stored_state != {"valid": True}:
+    if not isinstance(stored_state, dict) or not isinstance(
+        stored_state.get("code_verifier"), str
+    ):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="OAuth state is invalid")
 
-    flow = _create_flow(state=state)
+    flow = _create_flow(state=state, code_verifier=stored_state["code_verifier"])
     try:
         try:
             await asyncio.to_thread(flow.fetch_token, code=code)
@@ -148,7 +152,7 @@ async def google_callback(
     return response
 
 
-def _create_flow(state: str) -> Flow:
+def _create_flow(state: str, code_verifier: str | None = None) -> Flow:
     settings = get_settings()
     client_config = {
         "web": {
@@ -159,7 +163,13 @@ def _create_flow(state: str) -> Flow:
             "redirect_uris": [settings.google_redirect_uri],
         }
     }
-    flow = Flow.from_client_config(client_config, scopes=GOOGLE_SCOPES, state=state)
+    flow = Flow.from_client_config(
+        client_config,
+        scopes=GOOGLE_SCOPES,
+        state=state,
+        code_verifier=code_verifier,
+        autogenerate_code_verifier=code_verifier is None,
+    )
     flow.redirect_uri = settings.google_redirect_uri
     return flow
 
