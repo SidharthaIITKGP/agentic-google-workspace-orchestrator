@@ -1,5 +1,6 @@
 """Pydantic request and response schemas."""
 
+from app.schemas.api import ApprovalResponse, QueryRequest, QueryResponse
 from app.schemas.contracts import (
     AgentResult,
     ErrorInfo,
@@ -15,6 +16,7 @@ from app.schemas.contracts import (
 )
 
 __all__ = [
+    "ApprovalResponse",
     "AgentResult",
     "ErrorInfo",
     "ExecutionPlan",
@@ -22,6 +24,8 @@ __all__ = [
     "ExecutionStep",
     "Intent",
     "OperationName",
+    "QueryRequest",
+    "QueryResponse",
     "Service",
     "StepOutputReference",
     "StepResult",
