@@ -1,9 +1,13 @@
 import json
+import logging
 from typing import Any, Protocol
 
 from openai import AsyncOpenAI
 
 from app.core.config import Settings
+
+
+logger = logging.getLogger(__name__)
 
 
 class LLMProviderError(RuntimeError):
@@ -50,6 +54,11 @@ class GroqProvider:
             content = completion.choices[0].message.content
             parsed = json.loads(content or "")
         except Exception as exc:
+            logger.warning(
+                "LLM request failed (%s, status=%s)",
+                type(exc).__name__,
+                getattr(exc, "status_code", None),
+            )
             raise LLMProviderError("The language model request failed") from exc
         if not isinstance(parsed, dict):
             raise LLMProviderError("The language model returned invalid structured output")

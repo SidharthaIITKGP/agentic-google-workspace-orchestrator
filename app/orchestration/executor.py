@@ -31,6 +31,14 @@ class ExecutionOutcome:
     pending_approval_ids: list[UUID]
 
 
+class ReferenceResolutionError(ValueError):
+    def __init__(self, code: str, step_id: str, path: list[str | int]) -> None:
+        super().__init__(code)
+        self.code = code
+        self.step_id = step_id
+        self.path = path
+
+
 class DAGExecutor:
     def __init__(self, session: AsyncSession, registry: AgentRegistry) -> None:
         self._session = session
@@ -100,6 +108,30 @@ class DAGExecutor:
                     continue
                 try:
                     arguments = _resolve_references(step.arguments, results)
+                except ReferenceResolutionError as exc:
+                    wave_results.append(
+                        (
+                            step,
+                            StepResult(
+                                step_id=step.step_id,
+                                status=ExecutionStatus.FAILED,
+                                error=ErrorInfo(
+                                    code=exc.code,
+                                    message=(
+                                        "A referenced prior-step result was unavailable; "
+                                        "the dependent search was not attempted"
+                                    ),
+                                    details={
+                                        "source_step_id": exc.step_id,
+                                        "path": exc.path,
+                                    },
+                                ),
+                            ),
+                            None,
+                            step.arguments,
+                        )
+                    )
+                    continue
                 except (KeyError, IndexError, TypeError, ValueError):
                     wave_results.append(
                         (
@@ -224,14 +256,44 @@ def _resolve_references(
             path = value.get("path", [])
             if not isinstance(step_id, str) or not isinstance(path, list):
                 raise ValueError("Malformed step reference")
+            if step_id not in results:
+                raise ReferenceResolutionError("reference_step_missing", step_id, path)
             current: Any = results[step_id].data
+            traversed: list[str | int] = []
             for segment in path:
-                if isinstance(current, dict) and isinstance(segment, str):
-                    current = current[segment]
-                elif isinstance(current, list) and isinstance(segment, int):
-                    current = current[segment]
+                normalized_segment: str | int = segment
+                if isinstance(current, list) and isinstance(segment, str):
+                    if segment in {"first", "next"}:
+                        normalized_segment = 0
+                    elif segment.isdigit():
+                        normalized_segment = int(segment)
+                if isinstance(current, dict) and isinstance(normalized_segment, str):
+                    if normalized_segment not in current:
+                        raise ReferenceResolutionError(
+                            "reference_field_missing",
+                            step_id,
+                            [*traversed, normalized_segment],
+                        )
+                    current = current[normalized_segment]
+                elif (
+                    isinstance(current, list)
+                    and isinstance(normalized_segment, int)
+                    and not isinstance(normalized_segment, bool)
+                ):
+                    if not 0 <= normalized_segment < len(current):
+                        raise ReferenceResolutionError(
+                            "reference_element_missing",
+                            step_id,
+                            [*traversed, normalized_segment],
+                        )
+                    current = current[normalized_segment]
                 else:
-                    raise TypeError("Reference path does not match result structure")
+                    raise ReferenceResolutionError(
+                        "reference_shape_mismatch",
+                        step_id,
+                        [*traversed, normalized_segment],
+                    )
+                traversed.append(normalized_segment)
             return current
         return {key: _resolve_references(item, results) for key, item in value.items()}
     if isinstance(value, list):

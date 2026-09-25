@@ -4,7 +4,7 @@ A Python service that will execute natural-language requests across Gmail, Googl
 
 ## Current status
 
-The core application now includes Google OAuth, encrypted credential storage and refresh, Gmail/Calendar/Drive agents, structured Groq classification and planning through its OpenAI-compatible API, concurrent DAG execution, approval-gated writes, conversation context, PostgreSQL persistence, Redis, and health/readiness checks. Background synchronization, retrieval ingestion, and Celery remain future work.
+The core application includes Google OAuth, encrypted credential storage and refresh, Gmail/Calendar/Drive agents, structured Groq classification and planning through its OpenAI-compatible API, concurrent DAG execution, approval-gated writes, conversation context, PostgreSQL persistence, Redis, health/readiness checks, and bounded Celery-based workspace synchronization. Local retrieval uses normalized Gmail, Calendar, and Drive content with 384-dimensional sentence-transformer embeddings in pgvector; Google remains the authoritative source.
 
 ## Google OAuth and query API
 
@@ -39,6 +39,14 @@ curl -b "workspace_session=<session-cookie>" \
 ```
 
 Consequential operations return a pending approval rather than executing immediately. Approve or reject the returned identifier with `POST /api/v1/actions/{approval_id}/approve` or `POST /api/v1/actions/{approval_id}/reject`, using the same session cookie.
+
+## Workspace synchronization and local retrieval
+
+Authenticated users can enqueue a bounded background sync with `POST /api/v1/sync/trigger` and inspect per-service state with `GET /api/v1/sync/status`. Celery workers normalize Gmail, Calendar, and Drive resources, chunk them deterministically, create normalized 384-dimensional MiniLM embeddings locally on CPU, and persist them in pgvector. Celery Beat queues connected users every 15 minutes; Redis prevents overlapping sync for the same user.
+
+Hybrid retrieval combines cosine similarity, PostgreSQL keyword relevance, and SQL-level metadata filters. All cache keys and database queries are user-scoped. Google Docs and plain-text files include extracted text; PDFs use filename and metadata only, without OCR. Native Google agents remain authoritative when the index is missing or stale and for all exact or write operations.
+
+Retrieval quality and latency are **not measured yet**. After migration and sync, run `python -m app.retrieval.evaluate` inside the API container to print actual Precision@5, measured latency, and tenant-isolation results.
 
 ## Setup
 
@@ -149,6 +157,12 @@ curl http://127.0.0.1:8000/ready
 
 Expected connectivity output is `postgresql: ok` and `redis: ok`; readiness should return HTTP 200 with both services marked `ok`.
 
-## Planned architecture
+## Architecture
 
-Requests will flow from an intent classifier to a query planner, a custom DAG executor, specialized Gmail/Calendar/Drive agents, and finally retrieval and response synthesis. Planned supporting services include PostgreSQL with pgvector, Redis, Celery, Google OAuth, and the Google Workspace APIs. See [`docs/architecture.md`](docs/architecture.md) for the boundary between current and planned components.
+Requests flow from an intent classifier to a query planner, a custom DAG executor, specialized Gmail/Calendar/Drive agents, local hybrid retrieval where appropriate, and response synthesis. PostgreSQL with pgvector stores application/index data, Redis supports cache and coordination, Celery runs bounded synchronization, and Google Workspace APIs remain authoritative. See [`docs/architecture.md`](docs/architecture.md) for current boundaries and remaining planned work.
+
+### Retrieval diagnostics
+
+Workspace retrieval reports separate embedding, database, and total durations. The first request in a process may include lazy model loading; use warm-request measurements before evaluating latency. Results are filtered with a calibrated lexical/vector threshold, deduplicated by Gmail thread where metadata permits, constrained to requested services, and bounded by `top_k`.
+
+Freshness is derived from per-service `sync_state.last_successful_sync` and status rather than result timestamps. `native_fallback_recommended` is advisory; `native_fallback_performed` remains false unless a native Google operation was actually executed.

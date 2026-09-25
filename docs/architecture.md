@@ -22,10 +22,28 @@ The main persistence groups are:
 - `conversations` and `messages` retain user interaction history.
 - `executions`, `execution_steps`, and `action_approvals` persist plans, step outcomes, and approval boundaries. `audit_logs` records security-relevant actions and is deliberately excluded from cascade deletion.
 - `workspace_items` stores normalized Gmail, Calendar, and Drive resources. External resource IDs are unique only within a user and service, preserving multi-user isolation.
-- `document_chunks` stores retrieval text and 1536-dimensional vectors. An HNSW index with cosine-distance operators supports approximate similarity search without requiring index training.
+- `document_chunks` stores retrieval text and 384-dimensional, normalized local MiniLM vectors. An HNSW cosine index supports approximate similarity search without index training.
 - `sync_state` tracks each user's per-service cursor, attempts, successful synchronization time, and errors.
 
-Relational indexes prioritize user-scoped filtering by service and timestamps. Embedding generation, repositories, synchronization, and retrieval queries remain future work.
+Relational indexes prioritize user-scoped filtering by service and timestamps. Every indexing and retrieval query includes `user_id`; metadata filters are applied in SQL before ranking.
+
+## Local retrieval and synchronization
+
+```text
+Google APIs
+  -> Celery background sync
+  -> service normalization and deterministic chunking
+  -> local sentence-transformers embeddings
+  -> PostgreSQL + pgvector
+  -> metadata-filtered hybrid retrieval
+  -> planner / DAG executor / grounded synthesis
+```
+
+The system uses `sentence-transformers/all-MiniLM-L6-v2` on CPU to avoid paid embedding APIs and managed vector databases. Its 384-dimensional normalized vectors are combined with PostgreSQL full-text relevance. Query-embedding cache keys include the user ID, and PostgreSQL queries enforce tenant isolation before vector retrieval.
+
+Celery workers use Redis for jobs and per-user overlap locks. Beat schedules connected-user synchronization every 15 minutes. Sync bounds limit Gmail and Drive item counts and Calendar time windows. Google Docs and plain-text Drive files include content; PDFs are metadata-searchable only, with no OCR.
+
+The local index is additive. Native Gmail, Calendar, and Drive agents remain authoritative for exact IDs, fresh operations, and all writes. Search results indicate staleness using the configurable threshold so the planner can prefer safe native fallback.
 
 ## Planned application flow
 

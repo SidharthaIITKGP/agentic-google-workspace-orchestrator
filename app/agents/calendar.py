@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -48,18 +48,26 @@ class CalendarAgent:
 
     async def search_events(self, arguments: StructuredData) -> AgentResult:
         service = await self._clients.build("calendar", "v3")
+        time_min = _optional_aware_timestamp(arguments, "time_min")
+        max_results = bounded_int(arguments, "max_results", 20, 250)
         request = service.events().list(
             calendarId=optional_string(arguments, "calendar_id") or "primary",
-            timeMin=_optional_aware_timestamp(arguments, "time_min"),
+            timeMin=time_min,
             timeMax=_optional_aware_timestamp(arguments, "time_max"),
             q=optional_string(arguments, "keywords"),
             singleEvents=True,
             orderBy="startTime",
-            maxResults=bounded_int(arguments, "max_results", 20, 250),
+            maxResults=max_results,
         )
         response = await asyncio.to_thread(request.execute)
         attendee = optional_string(arguments, "attendee")
         events = [_event_summary(event) for event in response.get("items", [])]
+        if time_min:
+            events = [
+                event
+                for event in events
+                if _is_at_or_after(event.get("start"), time_min)
+            ]
         if attendee:
             events = [
                 event
@@ -67,6 +75,8 @@ class CalendarAgent:
                 if attendee.lower()
                 in {str(item).lower() for item in event.get("attendees", [])}
             ]
+        events.sort(key=_event_start_sort_key)
+        events = events[:max_results]
         return completed(
             {"events": events, "next_page_token": response.get("nextPageToken")},
             [str(event["id"]) for event in events],
@@ -178,6 +188,10 @@ def _event_summary(event: dict[str, Any]) -> dict[str, Any]:
         "start": event.get("start", {}).get("dateTime") or event.get("start", {}).get("date"),
         "end": event.get("end", {}).get("dateTime") or event.get("end", {}).get("date"),
         "timezone": event.get("start", {}).get("timeZone"),
+        "organizer": (
+            event.get("organizer", {}).get("displayName")
+            or event.get("organizer", {}).get("email")
+        ),
         "attendees": [item.get("email") for item in event.get("attendees", []) if item.get("email")],
         "html_link": event.get("htmlLink"),
         "status": event.get("status"),
@@ -206,3 +220,23 @@ def _validate_aware_timestamp(value: str, name: str) -> None:
         raise ValueError(f"{name} must be an ISO timestamp") from exc
     if parsed.tzinfo is None:
         raise ValueError(f"{name} must include a timezone")
+
+
+def _event_start_sort_key(event: dict[str, Any]) -> datetime:
+    value = event.get("start")
+    if not isinstance(value, str):
+        return datetime.max.replace(tzinfo=timezone.utc)
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        parsed = parsed.astimezone()
+    return parsed
+
+
+def _is_at_or_after(value: object, lower_bound: str) -> bool:
+    if not isinstance(value, str):
+        return False
+    event_start = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    threshold = datetime.fromisoformat(lower_bound.replace("Z", "+00:00"))
+    if event_start.tzinfo is None or event_start.utcoffset() is None:
+        event_start = event_start.replace(tzinfo=threshold.tzinfo)
+    return event_start >= threshold

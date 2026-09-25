@@ -27,6 +27,10 @@ def test_infrastructure_settings_have_safe_local_defaults(
     assert settings.database_pool_size == 5
     assert settings.database_max_overflow == 10
     assert settings.dependency_timeout_seconds == 2.0
+    assert settings.embedding_model == "sentence-transformers/all-MiniLM-L6-v2"
+    assert settings.embedding_dimensions == 384
+    assert settings.embedding_warmup_enabled is False
+    assert settings.index_stale_after_minutes == 15
 
 
 def test_infrastructure_settings_accept_environment_overrides(

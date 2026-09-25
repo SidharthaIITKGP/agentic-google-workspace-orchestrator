@@ -1,7 +1,7 @@
 from sqlalchemy import MetaData
 from sqlalchemy.orm import DeclarativeBase
 
-EMBEDDING_DIMENSIONS = 1536
+EMBEDDING_DIMENSIONS = 384
 
 NAMING_CONVENTION = {
     "ix": "ix_%(column_0_label)s",

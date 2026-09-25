@@ -65,6 +65,35 @@ OPERATION_SPECIFICATIONS: dict[Service, dict[str, OperationSpec]] = {
                 "max_results": "integer from 1 to 250",
                 "calendar_id": "string",
             },
+            "result_shape": {
+                "events": [
+                    {
+                        "id": "string",
+                        "title": "string",
+                        "description": "string",
+                        "start": "ISO-8601 timestamp",
+                        "end": "ISO-8601 timestamp",
+                        "organizer": "string or null",
+                        "attendees": ["email/string"],
+                        "status": "string",
+                    }
+                ],
+                "next_page_token": "string or null",
+            },
+            "reference_examples": {
+                "selected_event_context": {
+                    "$step": "calendar_step_id",
+                    "path": ["events", 0],
+                },
+                "first_event_title": {
+                    "$step": "calendar_step_id",
+                    "path": ["events", 0, "title"],
+                },
+                "first_event_attendees": {
+                    "$step": "calendar_step_id",
+                    "path": ["events", 0, "attendees"],
+                },
+            },
         },
         "get_event": {
             "description": "Retrieve one calendar event.",
@@ -144,10 +173,34 @@ OPERATION_SPECIFICATIONS: dict[Service, dict[str, OperationSpec]] = {
             "optional_arguments": {},
         },
     },
+    Service.WORKSPACE: {
+        "workspace_search": {
+            "description": (
+                "Read-only semantic and keyword search over the user's locally indexed "
+                "Gmail, Calendar, and Drive content. Use native Google operations for "
+                "exact IDs, fresh state, and all writes."
+            ),
+            "required_arguments": {
+                "query": (
+                    "non-empty search string, or one Calendar event object whose title, "
+                    "description, and limited attendees form the semantic query"
+                )
+            },
+            "optional_arguments": {
+                "services": "array containing gmail, google_calendar, and/or google_drive",
+                "top_k": "integer from 1 to 50; defaults to 5",
+                "sender": "email/string metadata filter",
+                "date_from": "ISO-8601 timezone-aware timestamp, inclusive",
+                "date_to": "ISO-8601 timezone-aware timestamp, exclusive",
+                "mime_type": "Drive MIME type filter",
+                "attendee": "Calendar attendee email filter",
+            },
+        },
+    },
 }
 
 
-_LIST_ARGUMENTS = {"add_label_ids", "remove_label_ids", "attendees"}
+_LIST_ARGUMENTS = {"add_label_ids", "remove_label_ids", "attendees", "services"}
 _TIMESTAMP_ARGUMENTS = {"time_min", "time_max", "start", "end", "modified_after", "modified_before"}
 
 
@@ -162,6 +215,8 @@ def validate_operation_arguments(
     service: Service,
     operation: str,
     arguments: StructuredData,
+    *,
+    allow_step_references: bool = False,
 ) -> None:
     try:
         spec = OPERATION_SPECIFICATIONS[service][operation]
@@ -182,8 +237,15 @@ def validate_operation_arguments(
         )
 
     for name, value in arguments.items():
-        if name == "max_results":
+        if allow_step_references and _contains_step_reference(value):
+            continue
+        if service == Service.WORKSPACE and operation == "workspace_search" and name == "query":
+            _validate_workspace_query(value)
+        elif name == "max_results":
             _validate_max_results(service, operation, value)
+        elif name == "top_k":
+            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 50:
+                raise ValueError("top_k must be between 1 and 50")
         elif name == "create_google_meet":
             if not isinstance(value, bool):
                 raise ValueError("create_google_meet must be a boolean")
@@ -195,7 +257,10 @@ def validate_operation_arguments(
         elif name in _TIMESTAMP_ARGUMENTS:
             _aware_timestamp(value, name)
         elif name in {"date_from", "date_to"}:
-            _iso_date(value, name)
+            if service == Service.WORKSPACE:
+                _aware_timestamp(value, name)
+            else:
+                _iso_date(value, name)
         elif not isinstance(value, str) or not value:
             raise ValueError(f"{name} must be a non-empty string")
 
@@ -205,11 +270,12 @@ def validate_operation_arguments(
         set(arguments) - {"event_id", "calendar_id"}
     ):
         raise ValueError("update_event requires at least one event field")
-    if operation == "share_file" and arguments.get("role", "reader") not in {
-        "reader",
-        "commenter",
-        "writer",
-    }:
+    role = arguments.get("role", "reader")
+    if (
+        operation == "share_file"
+        and not (allow_step_references and _contains_step_reference(role))
+        and role not in {"reader", "commenter", "writer"}
+    ):
         raise ValueError("role must be reader, commenter, or writer")
 
     if service == Service.GOOGLE_CALENDAR:
@@ -219,6 +285,45 @@ def validate_operation_arguments(
         _validate_order(arguments, "modified_after", "modified_before")
     if service == Service.GMAIL:
         _validate_date_order(arguments, "date_from", "date_to")
+    if service == Service.WORKSPACE:
+        services = arguments.get("services", [])
+        allowed = {
+            Service.GMAIL.value,
+            Service.GOOGLE_CALENDAR.value,
+            Service.GOOGLE_DRIVE.value,
+        }
+        if any(service_name not in allowed for service_name in services):
+            raise ValueError("services contains an unsupported workspace service")
+        _validate_order(arguments, "date_from", "date_to")
+
+
+def _contains_step_reference(value: Any) -> bool:
+    if isinstance(value, dict):
+        if "$step" in value:
+            return True
+        return any(_contains_step_reference(child) for child in value.values())
+    if isinstance(value, list):
+        return any(_contains_step_reference(child) for child in value)
+    return False
+
+
+def _validate_workspace_query(value: Any) -> None:
+    if isinstance(value, str) and value.strip():
+        return
+    if isinstance(value, dict):
+        title = value.get("title")
+        description = value.get("description")
+        attendees = value.get("attendees")
+        if isinstance(title, str) and title.strip():
+            if description is not None and not isinstance(description, str):
+                raise ValueError("workspace event description must be a string")
+            if attendees is not None and (
+                not isinstance(attendees, list)
+                or any(not isinstance(item, str) for item in attendees)
+            ):
+                raise ValueError("workspace event attendees must be an array of strings")
+            return
+    raise ValueError("query must be a non-empty string or Calendar event context")
 
 
 def _require(
@@ -263,6 +368,10 @@ def _iso_date(value: Any, name: str) -> date:
 
 def _validate_order(arguments: StructuredData, start_name: str, end_name: str) -> None:
     if start_name in arguments and end_name in arguments:
+        if _contains_step_reference(arguments[start_name]) or _contains_step_reference(
+            arguments[end_name]
+        ):
+            return
         if _aware_timestamp(arguments[start_name], start_name) >= _aware_timestamp(
             arguments[end_name], end_name
         ):
@@ -271,6 +380,10 @@ def _validate_order(arguments: StructuredData, start_name: str, end_name: str) -
 
 def _validate_date_order(arguments: StructuredData, start_name: str, end_name: str) -> None:
     if start_name in arguments and end_name in arguments:
+        if _contains_step_reference(arguments[start_name]) or _contains_step_reference(
+            arguments[end_name]
+        ):
+            return
         if _iso_date(arguments[start_name], start_name) >= _iso_date(
             arguments[end_name], end_name
         ):

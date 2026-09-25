@@ -11,3 +11,5 @@ pgvector>=0.3,<1.0
 psycopg[binary]>=3.2,<4.0
 redis>=5.2,<6.0
 SQLAlchemy>=2.0,<3.0
+celery>=5.4,<6.0
+sentence-transformers>=3.3,<4.0

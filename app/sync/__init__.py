@@ -1,0 +1,1 @@
+"""Bounded Google Workspace synchronization."""

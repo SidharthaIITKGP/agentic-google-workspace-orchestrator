@@ -1,5 +1,4 @@
 from functools import lru_cache
-
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -10,6 +9,7 @@ class Settings(BaseSettings):
     app_name: str = "Agentic Google Workspace Orchestrator"
     app_env: str = "development"
     log_level: str = "INFO"
+    frontend_origin: str = "http://localhost:5173"
     postgres_db: str = "workspace_orchestrator"
     postgres_user: str = "workspace"
     postgres_password: str = "development-only-password"
@@ -31,6 +31,16 @@ class Settings(BaseSettings):
     groq_model: str = "llama-3.3-70b-versatile"
     default_user_timezone: str = "Asia/Kolkata"
     default_meeting_duration_minutes: int = Field(default=30, ge=1, le=1440)
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_dimensions: int = Field(default=384, ge=384, le=384)
+    embedding_cache_ttl_seconds: int = Field(default=3600, ge=60)
+    embedding_warmup_enabled: bool = False
+    index_stale_after_minutes: int = Field(default=15, ge=1)
+    sync_gmail_max_items: int = Field(default=200, ge=1, le=5000)
+    sync_calendar_lookback_days: int = Field(default=30, ge=0, le=3650)
+    sync_calendar_lookahead_days: int = Field(default=90, ge=1, le=3650)
+    sync_drive_max_items: int = Field(default=200, ge=1, le=5000)
+    sync_lock_ttl_seconds: int = Field(default=900, ge=60)
     oauth_state_ttl_seconds: int = Field(default=600, ge=60)
     session_ttl_seconds: int = Field(default=604800, ge=300)
     llm_timeout_seconds: float = Field(default=30.0, gt=0)

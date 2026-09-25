@@ -65,6 +65,7 @@ class DriveAgent:
             service.files()
             .list(
                 q=" and ".join(query_parts),
+                orderBy="modifiedTime desc",
                 pageSize=bounded_int(arguments, "max_results", 50, 100),
                 fields="nextPageToken,files(id,name,mimeType,modifiedTime,createdTime,parents,webViewLink,size)",
             )

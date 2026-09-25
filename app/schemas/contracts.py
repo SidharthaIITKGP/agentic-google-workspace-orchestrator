@@ -18,6 +18,7 @@ class Service(StrEnum):
     GMAIL = "gmail"
     GOOGLE_CALENDAR = "google_calendar"
     GOOGLE_DRIVE = "google_drive"
+    WORKSPACE = "workspace"
 
 
 class ExecutionStatus(StrEnum):

@@ -1,6 +1,7 @@
 from app.agents.calendar import CalendarAgent
 from app.agents.drive import DriveAgent
 from app.agents.gmail import GmailAgent
+from app.agents.workspace import WorkspaceSearchAgent
 from app.orchestration.operation_specs import (
     planner_operation_catalog,
     validate_operation_arguments,
@@ -29,6 +30,7 @@ class AgentRegistry:
         gmail: GmailAgent,
         calendar: CalendarAgent,
         drive: DriveAgent,
+        workspace: WorkspaceSearchAgent | None = None,
     ) -> None:
         self._agents = {
             Service.GMAIL: gmail,
@@ -40,6 +42,9 @@ class AgentRegistry:
             Service.GOOGLE_CALENDAR: frozenset(calendar.supported_operations),
             Service.GOOGLE_DRIVE: frozenset(drive.supported_operations),
         }
+        if workspace is not None:
+            self._agents[Service.WORKSPACE] = workspace
+            self._operations[Service.WORKSPACE] = frozenset(workspace.supported_operations)
 
     def validate_operation(self, service: Service, operation: str) -> None:
         if operation not in self._operations.get(service, frozenset()):
@@ -48,7 +53,12 @@ class AgentRegistry:
     def validate_plan(self, plan: ExecutionPlan) -> None:
         for step in plan.steps:
             self.validate_operation(step.service, step.operation)
-            validate_operation_arguments(step.service, step.operation, step.arguments)
+            validate_operation_arguments(
+                step.service,
+                step.operation,
+                step.arguments,
+                allow_step_references=True,
+            )
 
     def requires_approval(self, service: Service, operation: str) -> bool:
         self.validate_operation(service, operation)

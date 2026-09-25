@@ -28,3 +28,20 @@ class ApprovalResponse(ApiModel):
     approval_id: UUID
     status: str
     result: dict[str, JsonValue] | None = None
+
+
+class SyncTriggerResponse(ApiModel):
+    status: str
+    task_id: str
+
+
+class SyncServiceStatus(ApiModel):
+    service: str
+    status: str
+    last_attempted_sync: str | None = None
+    last_successful_sync: str | None = None
+    error: dict[str, JsonValue] | None = None
+
+
+class SyncStatusResponse(ApiModel):
+    services: list[SyncServiceStatus]

@@ -92,7 +92,7 @@ def test_required_uniqueness_constraints() -> None:
 
 
 def test_embedding_dimension_and_cosine_index() -> None:
-    assert EMBEDDING_DIMENSIONS == 1536
+    assert EMBEDDING_DIMENSIONS == 384
     assert DocumentChunk.__table__.c.embedding.type.dim == EMBEDDING_DIMENSIONS
 
     embedding_index = next(
