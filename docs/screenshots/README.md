@@ -1,11 +1,10 @@
 # README Screenshots
 
-No screenshots are fabricated or checked in by this packaging pass.
+The README uses two sanitized demonstration images:
 
-Capture sanitized images at a consistent laptop-sized viewport and use:
+- `ui-multiservice.png` — Calendar and original Gmail-result text with workspace sync status.
+- `ui-approval.png` — an approval-gated Calendar write using fictional demo identity data.
 
-- `ui-multiservice.png` — multi-service response with service badges and execution details.
-- `ui-approval.png` — pending approval card with safe demo data only.
-- `ui-conversation-context.png` — a two-turn contextual conversation.
+The approval screenshot replaces personal identity data and its live approval identifier with fictional values. The workspace-read screenshot intentionally retains the original Gmail-result text at the project owner's request and should be reviewed once more before publishing the repository.
 
-Before adding an image, hide browser/profile identifiers and confirm it contains no private email bodies, OAuth data, API keys, session cookies, personal attendee lists, or debug payloads. After adding the real files, reference them from the main README.
+Any replacement image should use a consistent laptop-sized viewport and contain no private email bodies, OAuth data, API keys, session cookies, personal attendee lists, or debug payloads.

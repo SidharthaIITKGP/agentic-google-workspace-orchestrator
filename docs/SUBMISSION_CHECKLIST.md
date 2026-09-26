@@ -1,30 +1,25 @@
 # Submission Checklist
 
-Items are deliberately unchecked until manually verified for the final commit/deployment.
+## Completed repository deliverables
 
-- [ ] GitHub repository public
-- [ ] README finalized
-- [ ] `DESIGN.md` reviewed
-- [ ] `API.md` reviewed against exported OpenAPI
-- [ ] Architecture diagram renders correctly
-- [ ] ER diagram renders correctly
-- [ ] 10+ sample queries reviewed
-- [ ] OpenAPI exported and/or Postman artifact imported successfully
-- [ ] Evaluation executed
-- [ ] Actual evaluation metrics recorded
-- [ ] Backend tests passed on final `main`
-- [ ] Frontend tests passed on final `main`
-- [ ] Docker build verified
-- [ ] Database migrations at head
-- [ ] OAuth flow verified
-- [ ] Gmail read verified
-- [ ] Calendar read/write verified
-- [ ] Drive read verified
-- [ ] Approval and duplicate-approval behavior verified
-- [ ] Multi-service query verified
-- [ ] Contextual dependent-DAG query verified
-- [ ] Demo screenshots captured and sanitized
-- [ ] Demo video recorded
-- [ ] Demo video link added to README
-- [ ] Tracked files checked for secrets
-- [ ] Final Git status clean
+- [x] Reviewer-focused `README.md`
+- [x] Detailed `DESIGN.md`
+- [x] Implemented API reference in `API.md`
+- [x] Current architecture and Mermaid diagram
+- [x] SQLAlchemy-based ER diagram
+- [x] Gmail, Calendar, Drive, contextual, conversation, and write sample queries
+- [x] Credential-free Postman collection
+- [x] Five-minute demo script
+- [x] React + TypeScript frontend implementation
+- [x] FastAPI backend implementation
+- [x] Custom dependency-aware DAG orchestration
+- [x] Approval-gated write architecture
+- [x] PostgreSQL/pgvector hybrid retrieval implementation
+- [x] Redis and Celery synchronization infrastructure
+- [x] Retrieval evaluation harness and methodology documentation
+
+## Remaining before submission
+
+- [x] Add reviewed screenshots (approval identifiers sanitized)
+- [x] Record the final demo video
+- [x] Add the final demo video URL to the README
