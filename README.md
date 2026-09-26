@@ -1,134 +1,159 @@
 # Agentic Google Workspace Orchestrator
 
-A Python service that will execute natural-language requests across Gmail, Google Calendar, and Google Drive through project-owned planning and orchestration components.
+A full-stack workspace assistant that turns natural-language requests into coordinated Gmail, Google Calendar, and Google Drive workflows. It combines Groq-based structured planning, a custom dependency-aware DAG executor, approval-gated writes, and user-scoped hybrid retrieval over a locally synchronized pgvector index.
 
-## Current status
+## Demo
 
-The core application includes Google OAuth, encrypted credential storage and refresh, Gmail/Calendar/Drive agents, structured Groq classification and planning through its OpenAI-compatible API, concurrent DAG execution, approval-gated writes, conversation context, PostgreSQL persistence, Redis, health/readiness checks, and bounded Celery-based workspace synchronization. Local retrieval uses normalized Gmail, Calendar, and Drive content with 384-dimensional sentence-transformer embeddings in pgvector; Google remains the authoritative source.
+The demo interface is a React/TypeScript chat application with sync status, service indicators, execution details, clarification turns, and explicit approval cards.
 
-## Google OAuth and query API
+**Demo video:** `<ADD VIDEO LINK>`
 
-Configure these values in `.env` using credentials from Google Cloud and an application-generated Fernet key:
+Screenshot placeholders and capture guidance are in [docs/screenshots/README.md](docs/screenshots/README.md).
 
-```dotenv
-GOOGLE_CLIENT_ID=...
-GOOGLE_CLIENT_SECRET=...
-GOOGLE_REDIRECT_URI=http://localhost:8000/api/v1/auth/google/callback
-TOKEN_ENCRYPTION_KEY=...
-GROQ_API_KEY=...
-GROQ_MODEL=llama-3.3-70b-versatile
-DEFAULT_USER_TIMEZONE=Asia/Kolkata
-DEFAULT_MEETING_DURATION_MINUTES=30
+## Key features
+
+- Natural-language Gmail, Calendar, and Drive reads through native Google APIs.
+- Structured Groq intent classification, planning, and grounded synthesis.
+- Custom DAG execution with concurrent independent steps and prior-result references.
+- Cross-service contextual retrieval using local MiniLM embeddings, PostgreSQL text relevance, and pgvector.
+- Persisted conversation context, execution plans, step results, approvals, and audit events.
+- Deterministic operation validation and explicit approval before external writes.
+- Calendar invitations, timezone-aware scheduling, and optional real Google Meet creation.
+- Encrypted Google credentials, HttpOnly sessions, and user-scoped storage/retrieval.
+- Bounded Celery synchronization, per-service freshness, Redis overlap locks, and native read fallback.
+- React UI with sync controls, service badges, partial-failure warnings, and safe links.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    UI[React UI] --> API[FastAPI]
+    API --> C[Intent classifier]
+    C --> P[Planner + operation registry]
+    P --> D[Validated DAG executor]
+    D --> G[Gmail agent]
+    D --> CAL[Calendar agent]
+    D --> DR[Drive agent]
+    D --> R[Hybrid workspace retrieval]
+    G & CAL & DR & R --> S[Grounded synthesis]
+    S --> UI
 ```
 
-Natural-language dates and times are interpreted in `DEFAULT_USER_TIMEZONE`.
-Calendar creation uses `DEFAULT_MEETING_DURATION_MINUTES` only when the user
-provides a start time without an end time or duration. Google Meet conferencing
-is requested only when the query explicitly asks for it, and calendar writes
-remain approval-gated.
+PostgreSQL/pgvector persists application and retrieval data, Redis supports sessions/cache/coordination, and Celery Worker + Beat maintain the local index. See [docs/architecture.md](docs/architecture.md) and [DESIGN.md](DESIGN.md).
 
-Start authentication in a browser at `http://localhost:8000/api/v1/auth/google`. The callback stores only encrypted access and refresh tokens, then creates an HttpOnly application session cookie.
+## Tech stack
 
-After authentication, open `http://localhost:8000/docs` in the same browser and use `POST /api/v1/query`; the HttpOnly session cookie is sent automatically. For an API client, retain the callback cookie and submit:
+- **Backend:** Python 3.11+, FastAPI, Pydantic v2, SQLAlchemy, Alembic, Psycopg 3
+- **Data and jobs:** PostgreSQL 16, pgvector, Redis 7, Celery Worker and Beat
+- **AI and retrieval:** Groq OpenAI-compatible API, `sentence-transformers/all-MiniLM-L6-v2`
+- **Google:** OAuth 2.0, Gmail API, Calendar API, Drive API
+- **Frontend:** React, TypeScript, Vite, custom CSS
+- **Runtime:** Docker Compose
+
+## How it works
+
+1. Google OAuth stores encrypted credentials and creates an HttpOnly application session.
+2. The query API loads recent conversation context and classifies the request into a typed intent.
+3. The planner uses registered operation specifications to build a validated execution DAG.
+4. The executor runs independent nodes concurrently and resolves explicit references for dependent nodes.
+5. Native agents or the user-scoped hybrid index retrieve evidence. Consequential steps stop at an approval boundary.
+6. Compact structured results are synthesized into a grounded response; failures and successful empty results remain distinct.
+
+## Safe writes
+
+Calendar, Gmail, and Drive writes covered by the registry's write policy are stored as fully resolved proposed actions. The UI shows a sanitized preview and requires **Approve** or **Reject**. Approval executes exactly the stored action without replanning; an already processed approval returns HTTP 409 and cannot run twice. Nothing is automatically approved.
+
+## Retrieval and synchronization
+
+Celery Beat queues connected users approximately every 15 minutes. Workers normalize bounded Gmail, Calendar, and Drive resources, create 384-dimensional local embeddings, and store chunks in pgvector. Hybrid search combines 75% cosine similarity and 25% PostgreSQL text relevance, then applies metadata/service filters, relevance thresholds, deduplication, and `top_k` bounds.
+
+Google remains authoritative. The local index is eventually consistent and supplements native APIs for semantic context. Freshness is calculated per service; fallback metadata distinguishes a recommendation from a native fallback that actually executed. PDFs are searchable by filename/metadata only; PDF body OCR is not implemented.
+
+## Quick start
+
+### 1. Clone and configure
 
 ```bash
-curl -b "workspace_session=<session-cookie>" \
-  -H "Content-Type: application/json" \
-  -d '{"query":"What is on my calendar tomorrow?"}' \
-  http://localhost:8000/api/v1/query
-```
-
-Consequential operations return a pending approval rather than executing immediately. Approve or reject the returned identifier with `POST /api/v1/actions/{approval_id}/approve` or `POST /api/v1/actions/{approval_id}/reject`, using the same session cookie.
-
-## Workspace synchronization and local retrieval
-
-Authenticated users can enqueue a bounded background sync with `POST /api/v1/sync/trigger` and inspect per-service state with `GET /api/v1/sync/status`. Celery workers normalize Gmail, Calendar, and Drive resources, chunk them deterministically, create normalized 384-dimensional MiniLM embeddings locally on CPU, and persist them in pgvector. Celery Beat queues connected users every 15 minutes; Redis prevents overlapping sync for the same user.
-
-Hybrid retrieval combines cosine similarity, PostgreSQL keyword relevance, and SQL-level metadata filters. All cache keys and database queries are user-scoped. Google Docs and plain-text files include extracted text; PDFs use filename and metadata only, without OCR. Native Google agents remain authoritative when the index is missing or stale and for all exact or write operations.
-
-Retrieval quality and latency are **not measured yet**. After migration and sync, run `python -m app.retrieval.evaluate` inside the API container to print actual Precision@5, measured latency, and tenant-isolation results.
-
-## Setup
-
-Python 3.11 or newer is required.
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements-dev.txt
-```
-
-Optionally copy `.env.example` to `.env` and adjust the safe development settings.
-
-## Run the application
-
-```bash
-python -m uvicorn app.main:app --reload
-```
-
-Check the application process:
-
-```bash
-curl http://127.0.0.1:8000/health
-```
-
-Expected response:
-
-```json
-{"status":"ok"}
-```
-
-This endpoint does not report on unimplemented external services.
-
-Readiness performs bounded live checks against PostgreSQL and Redis:
-
-```bash
-curl http://127.0.0.1:8000/ready
-```
-
-`GET /health` is a lightweight liveness probe and remains available even when infrastructure is unavailable. `GET /ready` returns HTTP 200 only when both dependencies respond; otherwise it returns HTTP 503 and marks each dependency as `ok` or `unavailable` without exposing internal errors.
-
-## Docker Compose development environment
-
-Prepare the local environment file before starting the containers:
-
-```bash
+git clone https://github.com/SidharthaIITKGP/agentic-google-workspace-orchestrator.git
+cd agentic-google-workspace-orchestrator
 cp .env.example .env
 ```
 
-The checked-in values are development-only placeholders. Change them for any shared or non-local environment. Inside Compose, the API reaches PostgreSQL at `db` and Redis at `redis`; local defaults use `localhost`. `DATABASE_URL` must use the `postgresql+psycopg` driver. `REDIS_KEY_NAMESPACE` isolates cache keys, while pool sizes and dependency timeouts can be adjusted through the variables documented in `.env.example`.
+Set real local values in `.env` for `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `TOKEN_ENCRYPTION_KEY`, and `GROQ_API_KEY`. Keep `GOOGLE_REDIRECT_URI=http://localhost:8000/api/v1/auth/google/callback` for this local setup.
 
-Importing and starting the application does not eagerly connect to either service. Database sessions connect when used, and the lifecycle-managed Redis pool connects on its first command.
-
-Build and start the API, PostgreSQL with pgvector, and Redis:
+Generate a Fernet key locally:
 
 ```bash
-docker compose up --build -d
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-Inspect container health and follow logs:
+In Google Cloud, enable Gmail, Calendar, and Drive APIs and register the exact redirect URI above.
+
+### 2. Build infrastructure and migrate
 
 ```bash
+docker compose build
+docker compose up -d db redis
+docker compose run --rm api python -m alembic upgrade head
+```
+
+### 3. Start the application
+
+```bash
+docker compose up -d
 docker compose ps
-docker compose logs -f api
 ```
 
-The API health endpoint is available at `http://127.0.0.1:8000/health`. It reports only that the FastAPI process is responding; it does not verify PostgreSQL or Redis connectivity.
+Open:
 
-For routine shutdown, preserve the PostgreSQL data volume:
+- UI: `http://localhost:5173`
+- Google login: `http://localhost:8000/api/v1/auth/google`
+- Swagger UI: `http://localhost:8000/docs`
+- Liveness: `http://localhost:8000/health`
+- Readiness: `http://localhost:8000/ready`
+
+Authenticate in the same browser before using the UI. For normal shutdown, preserve PostgreSQL data:
 
 ```bash
 docker compose down
 ```
 
-PostgreSQL data is stored in the named `postgres_data` volume and survives routine container shutdown and recreation. Running `docker compose down -v` deletes that persistent database data and should not be used for routine shutdown.
+Do not use `docker compose down -v` for routine shutdown; it deletes the persistent `postgres_data` volume.
 
-## Database migrations
+## Environment variables
 
-Database schema changes are versioned with Alembic and use the same `DATABASE_URL` as the application. Migrations are explicit operational commands; FastAPI startup does not run them automatically and the application does not use `Base.metadata.create_all()`.
+Principal local settings are documented with safe placeholders in [.env.example](.env.example); additional bounded TTL/timeout settings have safe defaults in `app/core/config.py`.
 
-With the Compose services running, inspect and apply migrations from the API container:
+| Group | Variables |
+|---|---|
+| Application | `APP_NAME`, `APP_ENV`, `LOG_LEVEL`, `FRONTEND_ORIGIN` |
+| PostgreSQL | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `DATABASE_URL`, pool settings |
+| Redis | `REDIS_URL`, `REDIS_KEY_NAMESPACE`, `DEPENDENCY_TIMEOUT_SECONDS` |
+| Google OAuth | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` |
+| Security/LLM | `TOKEN_ENCRYPTION_KEY`, `GROQ_API_KEY`, `GROQ_MODEL` |
+| Time handling | `DEFAULT_USER_TIMEZONE`, `DEFAULT_MEETING_DURATION_MINUTES` |
+| Retrieval | `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS`, cache/warmup/staleness settings |
+| Sync | Gmail/Drive bounds, Calendar window, and sync-lock TTL settings |
+
+Never commit `.env`, `frontend/.env`, tokens, cookies, or real credentials.
+
+## Example queries
+
+See [docs/SAMPLE_QUERIES.md](docs/SAMPLE_QUERIES.md) for Gmail, Calendar, Drive, multi-service, clarification, conversation, and approval-gated examples.
+
+## API
+
+See [API.md](API.md), Swagger at `http://localhost:8000/docs`, and the credential-free [Postman collection](docs/Agentic_Workspace_Orchestrator.postman_collection.json).
+
+Export the exact running OpenAPI document with:
+
+```bash
+curl --fail http://localhost:8000/openapi.json -o docs/openapi.json
+```
+
+## Database
+
+See [docs/ER_DIAGRAM.md](docs/ER_DIAGRAM.md). Migrations are explicit and are not run at application startup:
 
 ```bash
 docker compose exec api python -m alembic current
@@ -136,33 +161,82 @@ docker compose exec api python -m alembic upgrade head
 docker compose exec api python -m alembic check
 ```
 
-Create future migration revisions only after intentionally changing SQLAlchemy metadata:
+## Evaluation
+
+See [docs/EVALUATION.md](docs/EVALUATION.md). Checked-in retrieval metrics have not been recorded yet; do not infer performance from design targets.
 
 ```bash
-docker compose exec api python -m alembic revision --autogenerate -m "describe schema change"
+docker compose exec api python -m app.retrieval.evaluate
 ```
 
-## Run tests
+## Testing
+
+Backend tests:
 
 ```bash
+source .venv/bin/activate
 python -m pytest -q
 ```
 
-The standard suite uses dependency overrides and in-memory fakes; it does not require live infrastructure. To verify actual connectivity through the running API container:
+Frontend tests and production build:
+
+```bash
+cd frontend
+npm ci
+npm test -- --run
+npm run build
+```
+
+Live infrastructure checks:
 
 ```bash
 docker compose exec api python -m app.db.check_connectivity
-curl http://127.0.0.1:8000/ready
+curl --fail http://localhost:8000/health
+curl --fail http://localhost:8000/ready
 ```
 
-Expected connectivity output is `postgresql: ok` and `redis: ok`; readiness should return HTTP 200 with both services marked `ok`.
+## Demo script
 
-## Architecture
+Use [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) and complete [docs/SUBMISSION_CHECKLIST.md](docs/SUBMISSION_CHECKLIST.md) before submission.
 
-Requests flow from an intent classifier to a query planner, a custom DAG executor, specialized Gmail/Calendar/Drive agents, local hybrid retrieval where appropriate, and response synthesis. PostgreSQL with pgvector stores application/index data, Redis supports cache and coordination, Celery runs bounded synchronization, and Google Workspace APIs remain authoritative. See [`docs/architecture.md`](docs/architecture.md) for current boundaries and remaining planned work.
+## Security
 
-### Retrieval diagnostics
+- Google credentials are encrypted at rest; browser JavaScript receives only an HttpOnly application session.
+- OAuth state is short-lived and one-time; production cookies are `Secure` and SameSite=Lax.
+- Conversations, executions, approvals, sync state, caches, and retrieval queries are user scoped.
+- LLM-generated plans are constrained by schemas, operation specifications, deterministic validation, and approval policy.
+- The frontend renders workspace content as text rather than trusted HTML.
 
-Workspace retrieval reports separate embedding, database, and total durations. The first request in a process may include lazy model loading; use warm-request measurements before evaluating latency. Results are filtered with a calibrated lexical/vector threshold, deduplicated by Gmail thread where metadata permits, constrained to requested services, and bounded by `top_k`.
+## Limitations
 
-Freshness is derived from per-service `sync_state.last_successful_sync` and status rather than result timestamps. `native_fallback_recommended` is advisory; `native_fallback_performed` remains false unless a native Google operation was actually executed.
+- Google OAuth may remain in testing mode depending on the Cloud project and test-user list.
+- The index is eventually consistent and its 15-minute target depends on Celery and Google quotas.
+- Local CPU embeddings can have a noticeable cold-start cost; warmup is optional.
+- PDF bodies are not extracted or OCR'd.
+- One configurable default timezone is used rather than a stored per-user preference.
+- The UI is optimized for a laptop demonstration, not comprehensive account administration.
+- Evaluation fixtures are small and synthetic; checked-in production-quality metrics are unavailable.
+
+## Repository structure
+
+```text
+app/
+  agents/          Gmail, Calendar, Drive, and workspace agents
+  api/routes/      health, auth, query, approval, and sync routes
+  auth/            credential encryption and security
+  db/              SQLAlchemy models and async sessions
+  integrations/    authenticated Google client factory
+  llm/             Groq provider
+  orchestration/   classifier, planner, registry, DAG executor, synthesis
+  retrieval/       normalization, embeddings, indexing, search, evaluator
+  sync/            per-service synchronization
+  workers/         Celery application and tasks
+frontend/          React + TypeScript + Vite UI
+alembic/           database migrations
+docs/              architecture, ER, evaluation, examples, demo artifacts
+tests/             backend test suite
+```
+
+## Experimental branch
+
+The optional [`experiment/jev-hybrid`](https://github.com/SidharthaIITKGP/agentic-google-workspace-orchestrator/tree/experiment/jev-hybrid) branch explores a specialized local bounded-decision model for routing and reranking while retaining Groq for planning and synthesis. It is not part of the stable `main` solution, and no latency or accuracy improvement is claimed without reproducible benchmark evidence.

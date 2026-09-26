@@ -1,61 +1,64 @@
 # Architecture
 
-## Current foundation
+The implemented application converts authenticated natural-language requests into validated, observable workflows across Gmail, Google Calendar, Google Drive, and a user-scoped local semantic index.
 
-The implemented system is a minimal FastAPI service with environment-based settings and a process-level `GET /health` endpoint. The health check confirms only that the HTTP application is responding; it does not claim connectivity to any future dependency.
+```mermaid
+flowchart TD
+    U[User] --> UI[React + TypeScript UI]
+    UI --> API[FastAPI query and approval APIs]
+    API --> AUTH[Google OAuth session]
+    API --> C[Groq intent classifier]
+    C --> P[Query planner + operation registry]
+    P --> V[Validated execution DAG]
+    V --> E[Concurrent and dependent DAG executor]
+    E --> G[Gmail agent]
+    E --> CAL[Calendar agent]
+    E --> D[Drive agent]
+    E --> W[Workspace hybrid retrieval]
+    G & CAL & D & W --> S[Grounded response synthesis]
+    S --> UI
 
-Phase 0.2 adds shared, JSON-serializable Pydantic contracts for classified intents, execution plans and steps, step results, and service-agent results. A common async `ServiceAgent` protocol defines the boundary future Gmail, Calendar, and Drive implementations will follow; no service implementation or execution engine exists yet.
-
-## Shared data flow
-
-An intent carries the requested services and extracted entities into planning. An execution plan contains independent or dependent steps, and each completed step produces a structured step result. Future service agents accept structured input and return structured agent results with source identifiers.
-
-Step arguments may refer to prior output with `{"$step": "step_id", "path": ["field", 0]}`. The referenced step must be an explicit dependency. Contracts validate the plan graph and reference shape, but reference resolution is planned work.
-
-## Database structure
-
-The PostgreSQL schema is versioned with Alembic. Application access uses asynchronous SQLAlchemy sessions with Psycopg 3, while migrations use synchronous Psycopg connections. Neither engine creation nor FastAPI startup verifies a live database connection, and migrations are never run automatically at application startup.
-
-The main persistence groups are:
-
-- `users` and `google_credentials` associate each user with storage reserved for encrypted OAuth tokens and granted scopes. Plaintext token storage is not supported.
-- `conversations` and `messages` retain user interaction history.
-- `executions`, `execution_steps`, and `action_approvals` persist plans, step outcomes, and approval boundaries. `audit_logs` records security-relevant actions and is deliberately excluded from cascade deletion.
-- `workspace_items` stores normalized Gmail, Calendar, and Drive resources. External resource IDs are unique only within a user and service, preserving multi-user isolation.
-- `document_chunks` stores retrieval text and 384-dimensional, normalized local MiniLM vectors. An HNSW cosine index supports approximate similarity search without index training.
-- `sync_state` tracks each user's per-service cursor, attempts, successful synchronization time, and errors.
-
-Relational indexes prioritize user-scoped filtering by service and timestamps. Every indexing and retrieval query includes `user_id`; metadata filters are applied in SQL before ranking.
-
-## Local retrieval and synchronization
-
-```text
-Google APIs
-  -> Celery background sync
-  -> service normalization and deterministic chunking
-  -> local sentence-transformers embeddings
-  -> PostgreSQL + pgvector
-  -> metadata-filtered hybrid retrieval
-  -> planner / DAG executor / grounded synthesis
+    DB[(PostgreSQL + pgvector)] --- API
+    R[(Redis)] --- API
+    OAUTH[Google OAuth 2.0] --- AUTH
+    BEAT[Celery Beat<br/>15-minute schedule] --> WORKER[Celery worker]
+    WORKER --> GOOGLE[Google Workspace APIs]
+    WORKER --> EMB[Local MiniLM embeddings]
+    WORKER --> DB
+    R --- WORKER
+    G & CAL & D --> GOOGLE
+    W --> DB
 ```
 
-The system uses `sentence-transformers/all-MiniLM-L6-v2` on CPU to avoid paid embedding APIs and managed vector databases. Its 384-dimensional normalized vectors are combined with PostgreSQL full-text relevance. Query-embedding cache keys include the user ID, and PostgreSQL queries enforce tenant isolation before vector retrieval.
+## Request and execution flow
 
-Celery workers use Redis for jobs and per-user overlap locks. Beat schedules connected-user synchronization every 15 minutes. Sync bounds limit Gmail and Drive item counts and Calendar time windows. Google Docs and plain-text Drive files include content; PDFs are metadata-searchable only, with no OCR.
+1. The browser authenticates through Google OAuth. The backend encrypts Google credentials and creates an HttpOnly application-session cookie; Google tokens are not exposed to frontend JavaScript.
+2. The query API loads up to five recent messages from the user-owned conversation and asks Groq for a structured `Intent`.
+3. The planner selects only registered operations and produces an `ExecutionPlan`. Pydantic and registry validation reject malformed steps, unsupported arguments, duplicate IDs, missing dependencies, self-dependencies, and cycles.
+4. The custom executor runs dependency-ready steps together. Independent nodes execute concurrently; dependent nodes resolve explicit references such as `{"$step":"calendar_step","path":["events",0,"title"]}` from completed prior results.
+5. Native agents call the Gmail, Calendar, and Drive APIs. Contextual queries may use the local workspace agent, which combines pgvector similarity, PostgreSQL text relevance, metadata filters, bounded ranking, and service filters.
+6. Results are compacted before grounded synthesis. Failed and skipped steps remain distinguishable from successful empty searches.
 
-The local index is additive. Native Gmail, Calendar, and Drive agents remain authoritative for exact IDs, fresh operations, and all writes. Search results indicate staleness using the configurable threshold so the planner can prefer safe native fallback.
+If a dependency fails, downstream steps are skipped rather than executed with invented inputs. Missing list elements and invalid reference paths fail explicitly.
 
-## Planned application flow
+## Native APIs and the local index
 
-The following components are planned and are not yet implemented:
+Google Workspace remains the source of truth. Native agents are used for exact resource access, fresh operations, and all writes. The local index supplements those APIs for contextual and semantic retrieval; it does not replace them.
 
-```text
-User Query
-  -> Intent Classifier
-  -> Query Planner
-  -> Custom DAG Executor
-  -> Gmail / Calendar / Drive Agents
-  -> Retrieval and Response Synthesizer
-```
+`workspace_items` stores normalized user resources and `document_chunks` stores 384-dimensional normalized vectors from `sentence-transformers/all-MiniLM-L6-v2`. Search is always constrained by `user_id`, optionally filtered by service and metadata, and bounded by `top_k`. Query embeddings are cached in process and Redis. Freshness is derived per service from `sync_state.last_successful_sync` and status. A stale or absent index can recommend, and when appropriate execute, a native read fallback; the response distinguishes recommendation from fallback actually performed.
 
-FastAPI exposes the current application interface. PostgreSQL with pgvector will support durable and vector data, Redis and Celery will support background execution, and Google OAuth will authorize access to Google Workspace APIs. These integrations, along with LLM calls, planning, DAG execution, and orchestration logic, are future work.
+## Synchronization
+
+Celery Beat enqueues connected users every 900 seconds. A Celery worker retrieves bounded Gmail, Calendar, and Drive data, normalizes and chunks it, creates local embeddings, and updates per-service sync state. Redis provides the broker and a renewable per-user overlap lock. Each service records its own attempt, success, status, and safe error metadata, so one service failure does not prevent the remaining services from being attempted.
+
+Google Docs and plain-text Drive files can contribute extracted text. PDFs are currently indexed by filename and metadata only; OCR and full PDF extraction are outside the current implementation.
+
+## Writes and approvals
+
+Consequential operations are never executed directly from a query. The executor stores the fully resolved proposed action and returns an `awaiting_approval` result. Authenticated approve/reject endpoints lock the user-owned approval row. Approval executes that stored action without replanning; rejection marks it skipped. A processed approval returns a conflict instead of running twice. Audit rows record approval execution or rejection.
+
+## Persistence and isolation
+
+PostgreSQL persists users, encrypted credentials, conversations, messages, execution plans and steps, approvals, audit records, indexed resources, chunks, and sync state. Ownership is explicit: conversations, executions, approvals, workspace resources, chunks, sync state, and retrieval queries are scoped by `user_id`. Resource uniqueness is defined within a user and service, never globally across tenants.
+
+Redis stores application sessions, OAuth state, caches, the Celery broker/backend, and sync coordination locks. Readiness checks PostgreSQL and Redis with bounded timeouts; liveness reports only that the FastAPI process is responding.

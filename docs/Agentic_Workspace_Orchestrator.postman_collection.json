@@ -1,0 +1,145 @@
+{
+  "info": {
+    "_postman_id": "c6e35a9f-dbb5-4e82-9827-d685037c2bd1",
+    "name": "Agentic Google Workspace Orchestrator",
+    "description": "Public API requests for the local orchestrator. Browser-authenticated routes require the HttpOnly workspace_session cookie obtained through Google OAuth. This collection contains no credentials, tokens, or cookies.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "approval_id",
+      "value": "00000000-0000-0000-0000-000000000000",
+      "type": "string"
+    },
+    {
+      "key": "conversation_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/health",
+          "host": ["{{base_url}}"],
+          "path": ["health"]
+        },
+        "description": "Unauthenticated FastAPI process liveness. Does not verify dependencies."
+      }
+    },
+    {
+      "name": "Readiness",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/ready",
+          "host": ["{{base_url}}"],
+          "path": ["ready"]
+        },
+        "description": "Unauthenticated bounded PostgreSQL and Redis checks. Returns 503 if either is unavailable."
+      }
+    },
+    {
+      "name": "Start Google OAuth",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/v1/auth/google",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "auth", "google"]
+        },
+        "description": "Starts Google OAuth by redirecting to Google. Complete this interactively in a browser. Subsequent authenticated requests require the resulting workspace_session cookie."
+      }
+    },
+    {
+      "name": "Submit Query",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"Show my latest unread emails\",\n  \"conversation_id\": null\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/api/v1/query",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "query"]
+        },
+        "description": "Requires workspace_session. To continue a conversation, replace null with the conversation_id returned by the first response."
+      }
+    },
+    {
+      "name": "Approve Action",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/v1/actions/{{approval_id}}/approve",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "actions", "{{approval_id}}", "approve"]
+        },
+        "description": "Requires workspace_session. Executes exactly the pending stored action. Replace approval_id only after reviewing the query response preview."
+      }
+    },
+    {
+      "name": "Reject Action",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/v1/actions/{{approval_id}}/reject",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "actions", "{{approval_id}}", "reject"]
+        },
+        "description": "Requires workspace_session. Rejects a pending action without executing it."
+      }
+    },
+    {
+      "name": "Trigger Workspace Sync",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/v1/sync/trigger",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "sync", "trigger"]
+        },
+        "description": "Requires workspace_session. Queues asynchronous synchronization and returns HTTP 202 without waiting for completion."
+      }
+    },
+    {
+      "name": "Get Workspace Sync Status",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/v1/sync/status",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "sync", "status"]
+        },
+        "description": "Requires workspace_session. Returns Gmail, Calendar, and Drive status plus actual attempt/success timestamps when available."
+      }
+    }
+  ]
+}
