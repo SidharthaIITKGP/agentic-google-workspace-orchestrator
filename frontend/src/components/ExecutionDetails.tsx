@@ -1,7 +1,15 @@
 import { AlertTriangle, Check, ChevronDown, Clock3, Search, SkipForward } from "lucide-react";
 import type { ActionTaken, ExecutionError, PendingApproval } from "../api/types";
 
-type Props = { actions: ActionTaken[]; errors: ExecutionError[]; approvals: PendingApproval[] };
+type DecisionMetadata = {
+  decision_provider?: string;
+  intent_family?: string;
+  confidence?: number;
+  fallback_used?: boolean;
+  model?: string;
+};
+
+type Props = { actions: ActionTaken[]; errors: ExecutionError[]; approvals: PendingApproval[]; decision?: DecisionMetadata | null };
 
 function actionLabel(action: ActionTaken): string {
   const data = action.data;
@@ -17,13 +25,23 @@ function actionLabel(action: ActionTaken): string {
   return `Completed step ${action.step_id}`;
 }
 
-export function ExecutionDetails({ actions, errors, approvals }: Props) {
-  if (!actions.length && !errors.length && !approvals.length) return null;
+function rerankingLabel(action: ActionTaken): string | null {
+  const value = action.data.reranking;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const provider = value.provider;
+  if (provider === "laya") return "Reranking — Laya";
+  if (provider === "hybrid_fallback") return "Reranking — Laya → hybrid fallback";
+  return null;
+}
+
+export function ExecutionDetails({ actions, errors, approvals, decision }: Props) {
+  if (!actions.length && !errors.length && !approvals.length && !decision) return null;
   return (
     <details className="execution-details">
       <summary><span><Search size={15} /> Execution details</span><ChevronDown size={16} /></summary>
       <div className="execution-list">
-        {actions.map((action) => <div className="execution-row" key={action.step_id}><span className="status-icon completed"><Check size={13} /></span><span>{actionLabel(action)}</span><small>completed</small></div>)}
+        {decision?.decision_provider && <div className="execution-row"><span className="status-icon completed"><Check size={13} /></span><span>Decision engine — {decision.decision_provider === "laya" ? "Laya" : decision.decision_provider === "groq_fallback" ? "Laya → Groq fallback" : "Groq"}</span><small>{decision.intent_family || "routing"}{typeof decision.confidence === "number" ? ` · ${Math.round(decision.confidence * 100)}%` : ""}</small></div>}
+        {actions.map((action) => <div key={action.step_id}><div className="execution-row"><span className="status-icon completed"><Check size={13} /></span><span>{actionLabel(action)}</span><small>completed</small></div>{rerankingLabel(action) && <div className="execution-row"><span className="status-icon completed"><Check size={13} /></span><span>{rerankingLabel(action)}</span><small>experimental</small></div>}</div>)}
         {approvals.map((approval) => <div className="execution-row" key={approval.approval_id}><span className="status-icon waiting"><Clock3 size={13} /></span><span>Step {approval.step_id}</span><small>awaiting approval</small></div>)}
         {errors.map((error) => <div className="execution-row" key={error.step_id}><span className={`status-icon ${error.status}`}>
           {error.status === "skipped" ? <SkipForward size={13} /> : <AlertTriangle size={13} />}

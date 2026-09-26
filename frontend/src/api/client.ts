@@ -93,6 +93,7 @@ export async function queryWorkspace(payload: QueryRequest): Promise<QueryRespon
     actions_taken: actions,
     pending_approvals: approvals,
     errors,
+    decision_metadata: response.decision_metadata ?? null,
   };
 }
 

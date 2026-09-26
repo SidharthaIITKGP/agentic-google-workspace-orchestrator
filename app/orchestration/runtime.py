@@ -10,9 +10,11 @@ from app.auth.security import TokenCipher
 from app.core.config import Settings
 from app.core.cache import RedisCache
 from app.integrations.google import GoogleClientFactory
+from app.llm.laya import build_laya_provider
 from app.orchestration.registry import AgentRegistry
 from app.retrieval.embeddings import embedding_provider_from_settings
 from app.retrieval.search import HybridWorkspaceSearch
+from app.retrieval.laya_reranker import LayaWorkspaceReranker
 
 
 def build_agent_registry(
@@ -30,6 +32,16 @@ def build_agent_registry(
     gmail = GmailAgent(clients)
     calendar = CalendarAgent(clients)
     drive = DriveAgent(clients)
+    laya = build_laya_provider(settings)
+    reranker = (
+        LayaWorkspaceReranker(
+            laya,
+            candidate_cap=settings.laya_rerank_candidates,
+            relevance_threshold=settings.laya_relevance_threshold,
+        )
+        if settings.laya_rerank_enabled and laya is not None
+        else None
+    )
     return AgentRegistry(
         gmail=gmail,
         calendar=calendar,
@@ -40,6 +52,7 @@ def build_agent_registry(
                 embeddings=embedding_provider_from_settings(settings),
                 cache=cache,
                 cache_ttl_seconds=settings.embedding_cache_ttl_seconds,
+                reranker=reranker,
             ),
             user_id=user_id,
             settings=settings,

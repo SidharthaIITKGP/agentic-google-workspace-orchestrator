@@ -137,6 +137,21 @@ class WorkspaceSearchAgent:
                     "cache_hit": response.embedding_cache_hit,
                 },
                 "index_stale": index_stale,
+                "reranking": {
+                    "provider": response.reranking_provider,
+                    "latency_ms": response.reranking_duration_ms,
+                    "fallback_used": response.reranking_fallback_used,
+                    **(
+                        {"model": response.reranking_model}
+                        if response.reranking_model is not None
+                        else {}
+                    ),
+                    **(
+                        {"input_tokens": response.reranking_input_tokens}
+                        if response.reranking_input_tokens is not None
+                        else {}
+                    ),
+                },
                 "freshness": freshness,
                 "native_fallback_recommended": index_stale,
                 "native_fallback_performed": fallback_performed,

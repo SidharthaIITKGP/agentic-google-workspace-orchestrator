@@ -6,6 +6,8 @@ A Python service that will execute natural-language requests across Gmail, Googl
 
 The core application includes Google OAuth, encrypted credential storage and refresh, Gmail/Calendar/Drive agents, structured Groq classification and planning through its OpenAI-compatible API, concurrent DAG execution, approval-gated writes, conversation context, PostgreSQL persistence, Redis, health/readiness checks, and bounded Celery-based workspace synchronization. Local retrieval uses normalized Gmail, Calendar, and Drive content with 384-dimensional sentence-transformer embeddings in pgvector; Google remains the authoritative source.
 
+The experimental branch also contains an opt-in, locally hosted Laya decision layer for bounded routing and retrieval reranking. It is disabled by default and always falls back to the existing Groq/hybrid paths. See [`docs/LAYA_EXPERIMENT.md`](docs/LAYA_EXPERIMENT.md).
+
 ## Google OAuth and query API
 
 Configure these values in `.env` using credentials from Google Cloud and an application-generated Fernet key:
@@ -19,6 +21,14 @@ GROQ_API_KEY=...
 GROQ_MODEL=llama-3.3-70b-versatile
 DEFAULT_USER_TIMEZONE=Asia/Kolkata
 DEFAULT_MEETING_DURATION_MINUTES=30
+
+# Optional local Laya experiment
+LAYA_ENABLED=false
+LAYA_BASE_URL=http://laya:8000
+LAYA_API_KEY=
+LAYA_MODEL=typed-decisions
+DECISION_ENGINE=groq
+LAYA_RERANK_ENABLED=false
 ```
 
 Natural-language dates and times are interpreted in `DEFAULT_USER_TIMEZONE`.
@@ -148,6 +158,12 @@ docker compose exec api python -m alembic revision --autogenerate -m "describe s
 python -m pytest -q
 ```
 
+The default tests mock Laya and do not download model weights. With the local Laya service healthy, compare baseline and hybrid decision paths without executing Workspace writes:
+
+```bash
+python -m app.experiments.laya_benchmark
+```
+
 The standard suite uses dependency overrides and in-memory fakes; it does not require live infrastructure. To verify actual connectivity through the running API container:
 
 ```bash
@@ -156,6 +172,21 @@ curl http://127.0.0.1:8000/ready
 ```
 
 Expected connectivity output is `postgresql: ok` and `redis: ok`; readiness should return HTTP 200 with both services marked `ok`.
+
+## Local Laya decision service
+
+Laya is isolated from the API image because its PyTorch/Transformers runtime is large and has different dependency requirements from the workspace embedding model. Start it once with the optional Compose profile:
+
+```bash
+docker compose --profile laya build laya
+docker compose --profile laya up -d laya
+docker compose --profile laya ps
+docker compose --profile laya logs -f laya
+```
+
+The first build and model download are large. The `laya_model_cache` volume preserves weights across ordinary `docker compose down` operations. Do not use `docker compose down -v` unless you intentionally want to remove the downloaded model.
+
+Once Laya is healthy, configure `LAYA_ENABLED=true`, `DECISION_ENGINE=hybrid`, and `LAYA_RERANK_ENABLED=true`, then recreate the API. The container uses `http://laya:8000`; a locally run FastAPI process can use `http://localhost:8010`.
 
 ## Architecture
 

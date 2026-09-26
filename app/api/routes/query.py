@@ -9,7 +9,9 @@ from app.api.dependencies import CurrentUserId, DatabaseSession, RedisCacheDepen
 from app.core.config import get_settings
 from app.db.models import Conversation, Message
 from app.llm.provider import GroqProvider, LLMProviderError
+from app.llm.laya import build_laya_provider
 from app.orchestration.classifier import IntentClassifier
+from app.orchestration.decisions import HybridDecisionEngine
 from app.orchestration.compaction import compact_results_for_synthesis
 from app.orchestration.executor import DAGExecutor
 from app.orchestration.planner import QueryPlanner
@@ -40,13 +42,21 @@ async def submit_query(
     try:
         provider = GroqProvider(settings)
         classifier = IntentClassifier(provider)
+        decision_engine = HybridDecisionEngine(
+            classifier,
+            build_laya_provider(settings),
+            mode=settings.decision_engine,
+            minimum_confidence=settings.laya_routing_min_confidence,
+        )
         reference_time = datetime.now(timezone.utc)
-        intent = await classifier.classify(
+        classified = await decision_engine.classify(
             query=request.query,
             context=context,
             reference_time=reference_time,
             timezone_name=settings.default_user_timezone,
         )
+        intent = classified.intent
+        decision_metadata = classified.metadata.as_dict()
         if intent.requires_clarification:
             clarification = intent.clarification_question or "Could you clarify your request?"
             session.add(
@@ -61,6 +71,7 @@ async def submit_query(
                 response=clarification,
                 conversation_id=conversation.id,
                 intent=intent,
+                decision_metadata=decision_metadata,
             )
 
         registry = build_agent_registry(session, user_id, settings, cache)
@@ -137,6 +148,7 @@ async def submit_query(
         actions_taken=actions_taken,
         pending_approvals=pending_approvals,
         errors=errors,
+        decision_metadata=decision_metadata,
     )
 
 

@@ -83,6 +83,9 @@ def compact_result_data(data: StructuredData) -> StructuredData:
         freshness = data.get("freshness")
         if isinstance(freshness, dict):
             compact["freshness"] = freshness
+        reranking = data.get("reranking")
+        if isinstance(reranking, dict):
+            compact["reranking"] = reranking
         return compact
 
     return data

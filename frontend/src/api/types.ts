@@ -35,6 +35,14 @@ export interface QueryResponse {
   actions_taken: ActionTaken[];
   pending_approvals: PendingApproval[];
   errors: ExecutionError[];
+  decision_metadata?: {
+    decision_provider?: string;
+    intent_family?: string;
+    confidence?: number;
+    fallback_used?: boolean;
+    model?: string;
+    latency_ms?: number;
+  } | null;
 }
 
 export interface QueryRequest {

@@ -15,6 +15,7 @@ from app.core.cache import RedisCache
 from app.db.models import DocumentChunk, SyncState, WorkspaceItem
 from app.retrieval.relevance import select_relevant_candidates
 from app.retrieval.embeddings import EmbeddingProvider
+from app.retrieval.laya_reranker import CandidateReranker
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,11 @@ class WorkspaceSearchResponse:
     database_duration_ms: float = 0.0
     embedding_cache_hit: bool = False
     sync_states: dict[str, dict[str, object]] = field(default_factory=dict)
+    reranking_provider: str = "disabled"
+    reranking_duration_ms: float = 0.0
+    reranking_fallback_used: bool = False
+    reranking_model: str | None = None
+    reranking_input_tokens: int | None = None
 
 
 _MAX_PROCESS_EMBEDDINGS = 128
@@ -83,11 +89,13 @@ class HybridWorkspaceSearch:
         embeddings: EmbeddingProvider,
         cache: RedisCache | None = None,
         cache_ttl_seconds: int = 3600,
+        reranker: CandidateReranker | None = None,
     ) -> None:
         self._session = session
         self._embeddings = embeddings
         self._cache = cache
         self._cache_ttl_seconds = cache_ttl_seconds
+        self._reranker = reranker
 
     async def search(
         self,
@@ -139,6 +147,10 @@ class HybridWorkspaceSearch:
         if filters.date_to:
             conditions.append(date_value < filters.date_to)
 
+        candidate_pool_size = max(
+            top_k * 5,
+            self._reranker.candidate_cap if self._reranker is not None else top_k,
+        )
         statement = (
             select(
                 WorkspaceItem.id,
@@ -153,7 +165,7 @@ class HybridWorkspaceSearch:
             .join(WorkspaceItem, WorkspaceItem.id == DocumentChunk.workspace_item_id)
             .where(and_(*conditions))
             .order_by(desc(score))
-            .limit(top_k * 5)
+            .limit(candidate_pool_size)
         )
         database_started = perf_counter()
         rows = (await self._session.execute(statement)).all()
@@ -205,20 +217,41 @@ class HybridWorkspaceSearch:
                 metadata=dict(row.resource_metadata),
                 indexed_at=row.indexed_at,
             ))
-            if len(results) == top_k * 5:
+            if len(results) == candidate_pool_size:
                 break
+        hybrid_results = select_relevant_candidates(
+            results,
+            query,
+            top_k=(max(top_k, self._reranker.candidate_cap) if self._reranker else top_k),
+            requested_services=set(filters.services) if filters.services else None,
+        )
+        reranking_provider = "disabled"
+        reranking_duration_ms = 0.0
+        reranking_fallback_used = False
+        reranking_model = None
+        reranking_input_tokens = None
+        if self._reranker is not None:
+            reranked = await self._reranker.rerank(query, hybrid_results, top_k)
+            final_results = reranked.results
+            reranking_provider = reranked.provider
+            reranking_duration_ms = reranked.latency_ms
+            reranking_fallback_used = reranked.fallback_used
+            reranking_model = reranked.model
+            reranking_input_tokens = reranked.input_tokens
+        else:
+            final_results = hybrid_results[:top_k]
         return WorkspaceSearchResponse(
-            results=select_relevant_candidates(
-                results,
-                query,
-                top_k=top_k,
-                requested_services=set(filters.services) if filters.services else None,
-            ),
+            results=final_results,
             duration_ms=(perf_counter() - started) * 1000,
             embedding_duration_ms=embedding_duration_ms,
             database_duration_ms=database_duration_ms,
             embedding_cache_hit=embedding_cache_hit,
             sync_states=sync_states,
+            reranking_provider=reranking_provider,
+            reranking_duration_ms=reranking_duration_ms,
+            reranking_fallback_used=reranking_fallback_used,
+            reranking_model=reranking_model,
+            reranking_input_tokens=reranking_input_tokens,
         )
 
     async def _query_embedding(self, user_id: UUID, query: str) -> list[float]:

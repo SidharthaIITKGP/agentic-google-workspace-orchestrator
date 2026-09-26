@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -44,6 +45,16 @@ class Settings(BaseSettings):
     oauth_state_ttl_seconds: int = Field(default=600, ge=60)
     session_ttl_seconds: int = Field(default=604800, ge=300)
     llm_timeout_seconds: float = Field(default=30.0, gt=0)
+    laya_enabled: bool = False
+    laya_base_url: str = "http://localhost:8010"
+    laya_api_key: str = ""
+    laya_model: Literal["english", "multilingual", "typed-decisions"] = "typed-decisions"
+    laya_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    laya_routing_min_confidence: float = Field(default=0.75, ge=0.5, le=1.0)
+    laya_rerank_enabled: bool = False
+    laya_rerank_candidates: int = Field(default=10, ge=1, le=20)
+    laya_relevance_threshold: float = Field(default=0.55, ge=0.0, le=1.0)
+    decision_engine: Literal["groq", "laya", "hybrid"] = "groq"
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -95,6 +95,32 @@ describe("demo UI", () => {
     expect(screen.queryByText(secretBody)).not.toBeInTheDocument();
   });
 
+  it("shows experimental decision and reranking provenance", () => {
+    const response: QueryResponse = {
+      response: "Relevant workspace context was found.",
+      conversation_id: "conversation",
+      intent: { intent_name: "search", required_services: ["workspace"], extracted_entities: {}, requires_clarification: false },
+      actions_taken: [{
+        step_id: "workspace",
+        data: {
+          searched_services: ["gmail"],
+          reranking: { provider: "laya", latency_ms: 8 },
+        },
+      }],
+      pending_approvals: [],
+      errors: [],
+      decision_metadata: {
+        decision_provider: "laya",
+        intent_family: "workspace_contextual_read",
+        confidence: 0.92,
+      },
+    };
+    render(<MessageBubble message={{ id: "1", role: "assistant", text: response.response, response }} onUnauthorized={() => undefined} />);
+    fireEvent.click(screen.getByText("Execution details"));
+    expect(screen.getByText("Decision engine — Laya")).toBeInTheDocument();
+    expect(screen.getByText("Reranking — Laya")).toBeInTheDocument();
+  });
+
   it("shows reconnect UI after a 401 session check", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: "Authentication required" }), { status: 401, headers: { "Content-Type": "application/json" } })));
     render(<App />);

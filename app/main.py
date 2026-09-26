@@ -14,6 +14,7 @@ from app.api.routes.readiness import router as readiness_router
 from app.api.routes.sync import router as sync_router
 from app.core.cache import RedisCache
 from app.core.config import get_settings
+from app.llm.laya import close_laya_providers
 from app.retrieval.embeddings import embedding_provider_from_settings
 
 settings = get_settings()
@@ -42,6 +43,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await close_laya_providers()
         await cache.close()
 
 

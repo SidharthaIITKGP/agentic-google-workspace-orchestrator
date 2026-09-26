@@ -24,6 +24,16 @@ services:
       TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
+      LAYA_ENABLED: ${LAYA_ENABLED:-false}
+      LAYA_BASE_URL: ${LAYA_BASE_URL:-http://laya:8000}
+      LAYA_API_KEY: ${LAYA_API_KEY:-}
+      LAYA_MODEL: ${LAYA_MODEL:-typed-decisions}
+      LAYA_TIMEOUT_SECONDS: ${LAYA_TIMEOUT_SECONDS:-10}
+      LAYA_ROUTING_MIN_CONFIDENCE: ${LAYA_ROUTING_MIN_CONFIDENCE:-0.75}
+      LAYA_RERANK_ENABLED: ${LAYA_RERANK_ENABLED:-false}
+      LAYA_RERANK_CANDIDATES: ${LAYA_RERANK_CANDIDATES:-10}
+      LAYA_RELEVANCE_THRESHOLD: ${LAYA_RELEVANCE_THRESHOLD:-0.55}
+      DECISION_ENGINE: ${DECISION_ENGINE:-groq}
       DEFAULT_USER_TIMEZONE: ${DEFAULT_USER_TIMEZONE:-Asia/Kolkata}
       DEFAULT_MEETING_DURATION_MINUTES: ${DEFAULT_MEETING_DURATION_MINUTES:-30}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
@@ -136,5 +146,31 @@ services:
       retries: 5
       start_period: 5s
 
+  laya:
+    profiles: ["laya"]
+    build:
+      context: .
+      dockerfile: Dockerfile.laya
+    environment:
+      LAYA_DEVICE: cpu
+      LAYA_MODEL: ${LAYA_MODEL:-typed-decisions}
+      LAYA_MODELS: ${LAYA_MODEL:-typed-decisions}
+      LAYA_PRELOAD: "1"
+      LAYA_AUTO_TASK: "1"
+      LAYA_THREADS: ${LAYA_THREADS:-8}
+      OMP_NUM_THREADS: ${LAYA_THREADS:-8}
+      LAYA_API_KEY: ${LAYA_API_KEY:-}
+    volumes:
+      - laya_model_cache:/home/laya/.cache/huggingface
+    ports:
+      - "127.0.0.1:8010:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 300s
+
 volumes:
   postgres_data:
+  laya_model_cache:

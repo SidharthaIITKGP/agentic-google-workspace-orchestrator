@@ -22,6 +22,7 @@ class QueryResponse(ApiModel):
     actions_taken: list[dict[str, JsonValue]] = Field(default_factory=list)
     pending_approvals: list[dict[str, JsonValue]] = Field(default_factory=list)
     errors: list[dict[str, JsonValue]] = Field(default_factory=list)
+    decision_metadata: dict[str, JsonValue] | None = None
 
 
 class ApprovalResponse(ApiModel):

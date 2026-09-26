@@ -24,7 +24,7 @@ export function MessageBubble({ message, onUnauthorized }: { message: ChatMessag
         <ServiceBadges services={servicesFromResponse(response.intent.required_services, response.actions_taken)} />
         {response.actions_taken.map((action) => <SafeLinks key={action.step_id} value={action.data} />)}
         {response.errors.length > 0 && <div className="partial-warning">Some steps did not complete. Open execution details for status.</div>}
-        <ExecutionDetails actions={response.actions_taken} errors={response.errors} approvals={response.pending_approvals} />
+        <ExecutionDetails actions={response.actions_taken} errors={response.errors} approvals={response.pending_approvals} decision={response.decision_metadata} />
         {response.pending_approvals.map((approval) => <ApprovalCard key={approval.approval_id} approval={approval} onUnauthorized={onUnauthorized} />)}
       </>}
       {message.role === "assistant" && <button className="copy-button" onClick={copy}>{copied ? <Check size={14} /> : <Copy size={14} />}{copied ? "Copied" : "Copy"}</button>}
